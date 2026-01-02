@@ -149,7 +149,7 @@ cd "$INSTALL_DIR"
 print_status "Downloading Monero daemon ${MONERO_VERSION}..."
 MONERO_FILE="monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2"
 if [ ! -f "monerod" ]; then
-    wget --progress=bar:force:noscroll "https://github.com/monero-project/monero/releases/download/${MONERO_VERSION}/$MONERO_FILE" 2>&1
+    wget --progress=bar:force:noscroll "https://downloads.getmonero.org/cli/$MONERO_FILE" 2>&1
     if [ $? -ne 0 ]; then
         print_error "Failed to download Monero daemon"
         exit 1
