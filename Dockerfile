@@ -22,12 +22,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sshx as root first
+# Install sshx (it automatically installs to /usr/local/bin)
 RUN curl -sSf https://sshx.io/get | sh
-
-# Copy sshx binary to a location accessible by appuser
-RUN cp /root/.local/bin/sshx /usr/local/bin/sshx && \
-    chmod +x /usr/local/bin/sshx
 
 # Create app directory
 WORKDIR /app
