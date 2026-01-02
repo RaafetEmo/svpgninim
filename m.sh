@@ -148,6 +148,11 @@ if [ ! -f "p2pool" ]; then
     fi
     print_status "Extracting P2Pool..."
     tar -xzf "p2pool-v4.13-linux-x64.tar.gz"
+    # Move p2pool binary from extracted directory
+    if [ -d "p2pool-v4.13-linux-x64" ]; then
+        mv p2pool-v4.13-linux-x64/p2pool . 2>/dev/null || true
+        rm -rf p2pool-v4.13-linux-x64
+    fi
     chmod +x p2pool 2>/dev/null || true
     rm "p2pool-v4.13-linux-x64.tar.gz"
     print_status "P2Pool installed successfully"
