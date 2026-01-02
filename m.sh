@@ -39,9 +39,12 @@ fi
 print_status "Starting Monero mining setup..."
 print_status "Wallet address: $WALLET_ADDRESS"
 
-# Check if running as root
-if [ "$EUID" -eq 0 ]; then 
-    print_warning "Running as root. This is not recommended for mining."
+# Detect environment
+if [ -f /.dockerenv ]; then
+    print_warning "Running in Docker container"
+    IS_DOCKER=1
+else
+    IS_DOCKER=0
 fi
 
 # Detect CPU architecture
@@ -59,28 +62,64 @@ print_status "Detected architecture: $ARCH_TYPE"
 
 # Update system and install dependencies
 print_status "Installing dependencies..."
-sudo apt-get update -qq
-sudo apt-get install -y wget curl tar bzip2 build-essential cmake libuv1-dev \
-    libssl-dev libhwloc-dev git automake libtool autoconf pkg-config \
-    tor torsocks screen htop net-tools 2>/dev/null || {
-    print_error "Failed to install dependencies"
-    exit 1
-}
-
-# Configure Tor
-print_status "Configuring Tor proxy..."
-sudo systemctl enable tor
-sudo systemctl start tor
-
-# Wait for Tor to start
-sleep 5
-
-if ! systemctl is-active --quiet tor; then
-    print_error "Tor failed to start"
-    exit 1
+if command -v apt-get &> /dev/null; then
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y wget curl tar bzip2 build-essential cmake libuv1-dev \
+        libssl-dev libhwloc-dev git automake libtool autoconf pkg-config \
+        tor torsocks screen htop net-tools procps 2>/dev/null || {
+        print_error "Failed to install dependencies"
+        exit 1
+    }
+elif command -v yum &> /dev/null; then
+    yum install -y wget curl tar bzip2 gcc gcc-c++ make cmake libuv-devel \
+        openssl-devel hwloc-devel git automake libtool autoconf pkgconfig \
+        tor screen htop net-tools 2>/dev/null || {
+        print_error "Failed to install dependencies"
+        exit 1
+    }
 fi
 
-print_status "Tor is running on 127.0.0.1:9050"
+# Configure and start Tor
+print_status "Configuring Tor proxy..."
+
+# Create Tor config
+mkdir -p /etc/tor
+cat > /etc/tor/torrc <<EOF
+SocksPort 9050
+ControlPort 9051
+DataDirectory /var/lib/tor
+Log notice stdout
+EOF
+
+# Start Tor in background if not running
+if ! pgrep -x "tor" > /dev/null; then
+    print_status "Starting Tor daemon..."
+    mkdir -p /var/lib/tor
+    chmod 700 /var/lib/tor
+    
+    if [ "$IS_DOCKER" -eq 1 ] || [ "$EUID" -eq 0 ]; then
+        tor -f /etc/tor/torrc &
+    else
+        if command -v systemctl &> /dev/null; then
+            sudo systemctl enable tor 2>/dev/null || true
+            sudo systemctl start tor 2>/dev/null || true
+        else
+            tor -f /etc/tor/torrc &
+        fi
+    fi
+    
+    TOR_PID=$!
+    sleep 5
+else
+    print_status "Tor is already running"
+fi
+
+# Verify Tor is working
+if curl --socks5 127.0.0.1:9050 --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep -q "true"; then
+    print_status "Tor is working correctly"
+else
+    print_warning "Tor connection check failed, but continuing..."
+fi
 
 # Create installation directory
 mkdir -p "$INSTALL_DIR"
@@ -173,33 +212,65 @@ cat > start-all.sh <<'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
 
+# Check if Tor is running, start if not
+if ! pgrep -x "tor" > /dev/null; then
+    echo "Starting Tor..."
+    tor -f /etc/tor/torrc >/dev/null 2>&1 &
+    sleep 5
+fi
+
 echo "Starting Monero node..."
-screen -dmS monerod bash start-monerod.sh
+if command -v screen &> /dev/null; then
+    screen -dmS monerod bash start-monerod.sh
+else
+    nohup bash start-monerod.sh > monerod.log 2>&1 &
+fi
 sleep 10
 
 echo "Starting P2Pool..."
-screen -dmS p2pool bash start-p2pool.sh
+if command -v screen &> /dev/null; then
+    screen -dmS p2pool bash start-p2pool.sh
+else
+    nohup bash start-p2pool.sh > p2pool.log 2>&1 &
+fi
 sleep 5
 
 echo "Starting XMRig miner..."
-screen -dmS xmrig bash start-xmrig.sh
+if command -v screen &> /dev/null; then
+    screen -dmS xmrig bash start-xmrig.sh
+else
+    nohup bash start-xmrig.sh > xmrig.log 2>&1 &
+fi
 
 echo ""
 echo "All services started!"
-echo "To view logs:"
-echo "  Monerod: screen -r monerod"
-echo "  P2Pool:  screen -r p2pool"
-echo "  XMRig:   screen -r xmrig"
-echo ""
-echo "To detach from screen: Ctrl+A then D"
+if command -v screen &> /dev/null; then
+    echo "To view logs:"
+    echo "  Monerod: screen -r monerod"
+    echo "  P2Pool:  screen -r p2pool"
+    echo "  XMRig:   screen -r xmrig"
+    echo ""
+    echo "To detach from screen: Ctrl+A then D"
+else
+    echo "To view logs:"
+    echo "  Monerod: tail -f monerod.log"
+    echo "  P2Pool:  tail -f p2pool.log"
+    echo "  XMRig:   tail -f xmrig.log"
+fi
 echo "To stop mining: ./stop-all.sh"
 EOF
 
 cat > stop-all.sh <<'EOF'
 #!/bin/bash
-screen -S xmrig -X quit 2>/dev/null
-screen -S p2pool -X quit 2>/dev/null
-screen -S monerod -X quit 2>/dev/null
+if command -v screen &> /dev/null; then
+    screen -S xmrig -X quit 2>/dev/null
+    screen -S p2pool -X quit 2>/dev/null
+    screen -S monerod -X quit 2>/dev/null
+else
+    pkill -f xmrig
+    pkill -f p2pool
+    pkill -f monerod
+fi
 echo "All mining services stopped"
 EOF
 
@@ -208,49 +279,44 @@ cat > status.sh <<'EOF'
 echo "=== Mining Status ==="
 echo ""
 echo "Tor status:"
-systemctl is-active --quiet tor && echo "✓ Running" || echo "✗ Stopped"
+pgrep -x tor > /dev/null && echo "✓ Running (PID: $(pgrep -x tor))" || echo "✗ Stopped"
 echo ""
 echo "Monerod status:"
-screen -list | grep -q monerod && echo "✓ Running" || echo "✗ Stopped"
+pgrep -f monerod > /dev/null && echo "✓ Running (PID: $(pgrep -f monerod))" || echo "✗ Stopped"
 echo ""
 echo "P2Pool status:"
-screen -list | grep -q p2pool && echo "✓ Running" || echo "✗ Stopped"
+pgrep -f p2pool > /dev/null && echo "✓ Running (PID: $(pgrep -f p2pool))" || echo "✗ Stopped"
 echo ""
 echo "XMRig status:"
-screen -list | grep -q xmrig && echo "✓ Running" || echo "✗ Stopped"
+pgrep -f xmrig > /dev/null && echo "✓ Running (PID: $(pgrep -f xmrig))" || echo "✗ Stopped"
 echo ""
-echo "Active screens:"
-screen -list
+if command -v screen &> /dev/null; then
+    echo "Active screens:"
+    screen -list 2>/dev/null || echo "No active screens"
+fi
+echo ""
+echo "Network connections:"
+netstat -tulpn 2>/dev/null | grep -E '(3333|9050|18083)' || ss -tulpn 2>/dev/null | grep -E '(3333|9050|18083)' || echo "Cannot check network connections"
+EOF
+
+cat > logs.sh <<'EOF'
+#!/bin/bash
+echo "=== Recent XMRig Output ==="
+if [ -f xmrig.log ]; then
+    tail -n 20 xmrig.log
+elif command -v screen &> /dev/null && screen -list | grep -q xmrig; then
+    echo "XMRig is running in screen session. Use: screen -r xmrig"
+else
+    echo "No logs available"
+fi
 EOF
 
 chmod +x *.sh
 
 # Enable huge pages for better performance
 print_status "Configuring system for optimal mining performance..."
-sudo sysctl -w vm.nr_hugepages=1280 2>/dev/null || true
-echo "vm.nr_hugepages=1280" | sudo tee -a /etc/sysctl.conf >/dev/null 2>&1 || true
-
-# Create systemd service (optional)
-print_status "Creating systemd service..."
-sudo tee /etc/systemd/system/monero-mining.service >/dev/null <<EOF
-[Unit]
-Description=Monero Mining Service
-After=network.target tor.service
-
-[Service]
-Type=forking
-User=$USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/start-all.sh
-ExecStop=$INSTALL_DIR/stop-all.sh
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
+sysctl -w vm.nr_hugepages=1280 2>/dev/null || true
+echo "vm.nr_hugepages=1280" >> /etc/sysctl.conf 2>/dev/null || true
 
 print_status "Setup completed successfully!"
 echo ""
@@ -268,10 +334,10 @@ echo ""
 echo "To check status:"
 echo "  cd $INSTALL_DIR && ./status.sh"
 echo ""
-echo "To enable auto-start on boot:"
-echo "  sudo systemctl enable monero-mining"
+echo "To view logs:"
+echo "  cd $INSTALL_DIR && ./logs.sh"
 echo ""
-echo "Starting mining now..."
+print_status "Starting mining now..."
 cd "$INSTALL_DIR"
 ./start-all.sh
 
