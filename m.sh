@@ -50,8 +50,10 @@ fi
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
     ARCH_TYPE="x86_64"
+    MONERO_ARCH="x64"  # Monero uses x64 not x86_64
 elif [ "$ARCH" = "aarch64" ]; then
     ARCH_TYPE="aarch64"
+    MONERO_ARCH="armv8"
 else
     print_error "Unsupported architecture: $ARCH"
     exit 1
@@ -145,7 +147,7 @@ cd "$INSTALL_DIR"
 
 # Download and setup Monero daemon (monerod)
 print_status "Downloading Monero daemon ${MONERO_VERSION}..."
-MONERO_FILE="monero-linux-${ARCH_TYPE}-${MONERO_VERSION}.tar.bz2"
+MONERO_FILE="monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2"
 if [ ! -f "monerod" ]; then
     wget --progress=bar:force:noscroll "https://github.com/monero-project/monero/releases/download/${MONERO_VERSION}/$MONERO_FILE" 2>&1
     if [ $? -ne 0 ]; then
