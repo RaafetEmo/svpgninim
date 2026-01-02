@@ -155,7 +155,15 @@ fi
 
 # Download and setup XMRig
 print_status "Downloading XMRig ${XMRIG_VERSION}..."
-XMRIG_FILE="xmrig-${XMRIG_VERSION}-linux-static-${ARCH_TYPE}.tar.gz"
+
+# Map architecture for XMRig
+case "$ARCH_TYPE" in
+    x86_64) XMRIG_ARCH="x64" ;;
+    aarch64) XMRIG_ARCH="aarch64" ;;
+    *) XMRIG_ARCH="$ARCH_TYPE" ;;
+esac
+
+XMRIG_FILE="xmrig-${XMRIG_VERSION}-linux-static-${XMRIG_ARCH}.tar.gz"
 if [ ! -f "xmrig" ]; then
     wget --progress=bar:force:noscroll "https://github.com/xmrig/xmrig/releases/download/v${XMRIG_VERSION}/$XMRIG_FILE" 2>&1
     if [ $? -ne 0 ]; then
