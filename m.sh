@@ -84,16 +84,12 @@ fi
 print_status "Configuring Tor proxy..."
 
 # Create Tor config
-mkdir -p /etc/tor /var/lib/tor
+mkdir -p /etc/tor
 cat > /etc/tor/torrc <<EOF
 SocksPort 9050
 ControlPort 9051
-DataDirectory /var/lib/tor
 Log notice stdout
 EOF
-
-# Fix permissions for Tor data directory
-chown -R $(whoami):$(id -gn) /var/lib/tor 2>/dev/null || chmod 700 /var/lib/tor
 
 # Start Tor in background if not running
 if ! pgrep -x "tor" > /dev/null; then
@@ -224,22 +220,17 @@ cd "$(dirname "$0")"
 if ! pgrep -x "tor" > /dev/null; then
     echo "Starting Tor..."
     
-    # Fix permissions
-    chown -R $(whoami):$(id -gn) /var/lib/tor 2>/dev/null || chmod 700 /var/lib/tor
-    
-    # Start Tor and monitor bootstrap
-    tor -f /etc/tor/torrc 2>&1 | {
-        while IFS= read -r line; do
-            echo "$line"
-            if echo "$line" | grep -q "Bootstrapped 100%"; then
-                echo "Tor ready!"
-                break
-            fi
-        done
-    } &
+    # Start Tor and monitor bootstrap from stdout
+    (tor -f /etc/tor/torrc 2>&1 | while IFS= read -r line; do
+        echo "$line"
+        if echo "$line" | grep -q "Bootstrapped 100%"; then
+            echo "Tor ready!"
+            break
+        fi
+    done) &
     
     # Wait for Tor to be ready
-    sleep 3
+    sleep 2
 fi
 
 echo "Starting Monero node..."
