@@ -216,7 +216,8 @@ cd "$(dirname "$0")"
     --max-concurrency 4 \
     --proxy 127.0.0.1:9050 \
     --tx-proxy tor,127.0.0.1:9050,16 \
-    --anonymous-inbound 127.0.0.1:18083,127.0.0.1:9050,16
+    --no-igd \
+    --hide-my-port
 EOF
 
 cat > start-p2pool.sh <<EOF
