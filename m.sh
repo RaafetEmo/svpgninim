@@ -7,7 +7,7 @@ set -e
 
 WALLET_ADDRESS="$1"
 INSTALL_DIR="$HOME/monero-mining"
-MONERO_VERSION="v0.18.3.4"
+MONERO_VERSION="v0.18.4.4"
 XMRIG_VERSION="6.21.3"
 P2POOL_VERSION="v4.1"
 
@@ -82,7 +82,7 @@ fi
 print_status "Configuring Tor proxy..."
 
 # Create Tor config
-mkdir -p /etc/tor
+mkdir -p /etc/tor /var/lib/tor
 cat > /etc/tor/torrc <<EOF
 SocksPort 9050
 ControlPort 9051
@@ -90,33 +90,53 @@ DataDirectory /var/lib/tor
 Log notice stdout
 EOF
 
+chmod 700 /var/lib/tor 2>/dev/null || true
+
 # Start Tor in background if not running
 if ! pgrep -x "tor" > /dev/null; then
     print_status "Starting Tor daemon..."
-    mkdir -p /var/lib/tor
-    chmod 700 /var/lib/tor 2>/dev/null || true
     
     if [ "$IS_DOCKER" = "1" ] || [ "$EUID" -eq 0 ]; then
-        tor -f /etc/tor/torrc > /dev/null 2>&1 &
+        tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
     else
         if command -v systemctl &> /dev/null; then
             sudo systemctl enable tor 2>/dev/null || true
             sudo systemctl start tor 2>/dev/null || true
         else
-            tor -f /etc/tor/torrc > /dev/null 2>&1 &
+            tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
         fi
     fi
     
-    sleep 5
+    # Wait for Tor to bootstrap to 100%
+    print_status "Waiting for Tor to bootstrap (this may take 30-60 seconds)..."
+    BOOTSTRAP_COUNT=0
+    while [ $BOOTSTRAP_COUNT -lt 60 ]; do
+        sleep 2
+        if [ -f /var/log/tor.log ]; then
+            if grep -q "Bootstrapped 100%" /var/log/tor.log 2>/dev/null; then
+                print_status "Tor bootstrapped successfully!"
+                break
+            fi
+        fi
+        # Also check if Tor port is listening
+        if netstat -tuln 2>/dev/null | grep -q ":9050" || ss -tuln 2>/dev/null | grep -q ":9050"; then
+            print_status "Tor is listening on port 9050"
+            break
+        fi
+        BOOTSTRAP_COUNT=$((BOOTSTRAP_COUNT + 1))
+        if [ $((BOOTSTRAP_COUNT % 5)) -eq 0 ]; then
+            print_warning "Still waiting for Tor... (${BOOTSTRAP_COUNT}/60 seconds)"
+        fi
+    done
 else
     print_status "Tor is already running"
 fi
 
 # Verify Tor is working
 if curl --socks5 127.0.0.1:9050 --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep -q "true"; then
-    print_status "Tor is working correctly"
+    print_status "Tor connection verified successfully"
 else
-    print_warning "Tor connection check failed, but continuing..."
+    print_warning "Tor connection check inconclusive, continuing anyway..."
 fi
 
 # Create installation directory
@@ -124,10 +144,10 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # Download and setup Monero daemon (monerod)
-print_status "Downloading Monero daemon..."
+print_status "Downloading Monero daemon ${MONERO_VERSION}..."
 MONERO_FILE="monero-linux-${ARCH_TYPE}-${MONERO_VERSION}.tar.bz2"
 if [ ! -f "monerod" ]; then
-    wget --progress=bar:force:noscroll "https://downloads.getmonero.org/cli/$MONERO_FILE" 2>&1
+    wget --progress=bar:force:noscroll "https://github.com/monero-project/monero/releases/download/${MONERO_VERSION}/$MONERO_FILE" 2>&1
     if [ $? -ne 0 ]; then
         print_error "Failed to download Monero daemon"
         exit 1
@@ -136,10 +156,11 @@ if [ ! -f "monerod" ]; then
     tar -xjf "$MONERO_FILE"
     mv monero-*/* . 2>/dev/null || true
     rm -rf monero-* "$MONERO_FILE"
+    print_status "Monero daemon installed successfully"
 fi
 
 # Download and setup P2Pool
-print_status "Downloading P2Pool..."
+print_status "Downloading P2Pool ${P2POOL_VERSION}..."
 P2POOL_FILE="p2pool-${P2POOL_VERSION}-linux-${ARCH_TYPE}.tar.gz"
 if [ ! -f "p2pool" ]; then
     wget --progress=bar:force:noscroll "https://github.com/SChernykh/p2pool/releases/download/${P2POOL_VERSION}/$P2POOL_FILE" 2>&1
@@ -150,10 +171,11 @@ if [ ! -f "p2pool" ]; then
     print_status "Extracting P2Pool..."
     tar -xzf "$P2POOL_FILE"
     rm "$P2POOL_FILE"
+    print_status "P2Pool installed successfully"
 fi
 
 # Download and setup XMRig
-print_status "Downloading XMRig..."
+print_status "Downloading XMRig ${XMRIG_VERSION}..."
 XMRIG_FILE="xmrig-${XMRIG_VERSION}-linux-static-${ARCH_TYPE}.tar.gz"
 if [ ! -f "xmrig" ]; then
     wget --progress=bar:force:noscroll "https://github.com/xmrig/xmrig/releases/download/v${XMRIG_VERSION}/$XMRIG_FILE" 2>&1
@@ -165,6 +187,7 @@ if [ ! -f "xmrig" ]; then
     tar -xzf "$XMRIG_FILE"
     mv xmrig-${XMRIG_VERSION}/xmrig . 2>/dev/null || true
     rm -rf xmrig-${XMRIG_VERSION} "$XMRIG_FILE"
+    print_status "XMRig installed successfully"
 fi
 
 # Create XMRig config with Tor support
@@ -228,8 +251,8 @@ cd "$(dirname "$0")"
 # Check if Tor is running, start if not
 if ! pgrep -x "tor" > /dev/null; then
     echo "Starting Tor..."
-    tor -f /etc/tor/torrc >/dev/null 2>&1 &
-    sleep 5
+    tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
+    sleep 10
 fi
 
 echo "Starting Monero node..."
@@ -292,7 +315,14 @@ cat > status.sh <<'EOF'
 echo "=== Mining Status ==="
 echo ""
 echo "Tor status:"
-pgrep -x tor > /dev/null && echo "✓ Running (PID: $(pgrep -x tor))" || echo "✗ Stopped"
+if pgrep -x tor > /dev/null; then
+    echo "✓ Running (PID: $(pgrep -x tor))"
+    if netstat -tuln 2>/dev/null | grep -q ":9050" || ss -tuln 2>/dev/null | grep -q ":9050"; then
+        echo "  Port 9050: Listening"
+    fi
+else
+    echo "✗ Stopped"
+fi
 echo ""
 echo "Monerod status:"
 pgrep -f monerod > /dev/null && echo "✓ Running (PID: $(pgrep -f monerod))" || echo "✗ Stopped"
@@ -336,6 +366,7 @@ echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Installation Directory:${NC} $INSTALL_DIR"
 echo -e "${GREEN}Wallet Address:${NC} $WALLET_ADDRESS"
+echo -e "${GREEN}Monero Version:${NC} $MONERO_VERSION"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "To start mining:"
