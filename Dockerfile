@@ -13,16 +13,12 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a user with sudo privileges
-RUN useradd -m -s /bin/bash appuser && \
-    echo "appuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sshx (it automatically installs to /usr/local/bin)
+# Install sshx
 RUN curl -sSf https://sshx.io/get | sh
 
 # Create app directory
@@ -36,7 +32,6 @@ const { spawn } = require('child_process');
 const PORT = process.env.PORT || 3000;
 let sshxLink = 'initializing...';
 
-// Execute sshx command and capture output
 console.log('Starting sshx...');
 const sshxProcess = spawn('sshx', [], {
   stdio: ['ignore', 'pipe', 'pipe']
@@ -50,7 +45,6 @@ sshxProcess.stdout.on('data', (data) => {
   stdoutData += output;
   console.log('SSHX stdout:', output);
   
-  // Try to extract link from stdout
   const linkMatch = output.match(/https:\/\/sshx\.io\/s\/[a-zA-Z0-9#_-]+/);
   if (linkMatch) {
     sshxLink = linkMatch[0];
@@ -63,7 +57,6 @@ sshxProcess.stderr.on('data', (data) => {
   stderrData += output;
   console.log('SSHX stderr:', output);
   
-  // Try to extract link from stderr
   const linkMatch = output.match(/https:\/\/sshx\.io\/s\/[a-zA-Z0-9#_-]+/);
   if (linkMatch) {
     sshxLink = linkMatch[0];
@@ -83,7 +76,6 @@ sshxProcess.on('close', (code) => {
   }
 });
 
-// Create HTTP server
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'application/json');
   
@@ -107,14 +99,8 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 EOF
 
-# Change ownership of app directory
-RUN chown -R appuser:appuser /app
-
 # Expose port
 EXPOSE 3000
 
-# Switch to appuser (but they can still use sudo)
-USER appuser
-
-# Start the application
+# Run as root (removed USER appuser line)
 CMD ["node", "server.js"]
