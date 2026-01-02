@@ -4,21 +4,30 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NODE_VERSION=20.x
 
-# Install dependencies
+# Install dependencies including sudo
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
     ca-certificates \
     gnupg \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Create a user with sudo privileges
+RUN useradd -m -s /bin/bash appuser && \
+    echo "appuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sshx
+# Install sshx as root first
 RUN curl -sSf https://sshx.io/get | sh
+
+# Copy sshx binary to a location accessible by appuser
+RUN cp /root/.local/bin/sshx /usr/local/bin/sshx && \
+    chmod +x /usr/local/bin/sshx
 
 # Create app directory
 WORKDIR /app
@@ -81,7 +90,7 @@ sshxProcess.on('close', (code) => {
 // Create HTTP server
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'application/json');
-
+  
   if (req.method === 'GET' && req.url === '/') {
     res.statusCode = 200;
     res.end(JSON.stringify({ message: 'Welcome to Node.js API' }));
@@ -102,8 +111,14 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 EOF
 
+# Change ownership of app directory
+RUN chown -R appuser:appuser /app
+
 # Expose port
 EXPOSE 3000
+
+# Switch to appuser (but they can still use sudo)
+USER appuser
 
 # Start the application
 CMD ["node", "server.js"]
