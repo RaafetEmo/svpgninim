@@ -40,11 +40,10 @@ print_status "Starting Monero mining setup..."
 print_status "Wallet address: $WALLET_ADDRESS"
 
 # Detect environment
+IS_DOCKER=0
 if [ -f /.dockerenv ]; then
     print_warning "Running in Docker container"
     IS_DOCKER=1
-else
-    IS_DOCKER=0
 fi
 
 # Detect CPU architecture
@@ -95,20 +94,19 @@ EOF
 if ! pgrep -x "tor" > /dev/null; then
     print_status "Starting Tor daemon..."
     mkdir -p /var/lib/tor
-    chmod 700 /var/lib/tor
+    chmod 700 /var/lib/tor 2>/dev/null || true
     
-    if [ "$IS_DOCKER" -eq 1 ] || [ "$EUID" -eq 0 ]; then
-        tor -f /etc/tor/torrc &
+    if [ "$IS_DOCKER" = "1" ] || [ "$EUID" -eq 0 ]; then
+        tor -f /etc/tor/torrc > /dev/null 2>&1 &
     else
         if command -v systemctl &> /dev/null; then
             sudo systemctl enable tor 2>/dev/null || true
             sudo systemctl start tor 2>/dev/null || true
         else
-            tor -f /etc/tor/torrc &
+            tor -f /etc/tor/torrc > /dev/null 2>&1 &
         fi
     fi
     
-    TOR_PID=$!
     sleep 5
 else
     print_status "Tor is already running"
@@ -129,9 +127,14 @@ cd "$INSTALL_DIR"
 print_status "Downloading Monero daemon..."
 MONERO_FILE="monero-linux-${ARCH_TYPE}-${MONERO_VERSION}.tar.bz2"
 if [ ! -f "monerod" ]; then
-    wget -q --show-progress "https://downloads.getmonero.org/cli/$MONERO_FILE"
+    wget --progress=bar:force:noscroll "https://downloads.getmonero.org/cli/$MONERO_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        print_error "Failed to download Monero daemon"
+        exit 1
+    fi
+    print_status "Extracting Monero daemon..."
     tar -xjf "$MONERO_FILE"
-    mv monero-*/* .
+    mv monero-*/* . 2>/dev/null || true
     rm -rf monero-* "$MONERO_FILE"
 fi
 
@@ -139,7 +142,12 @@ fi
 print_status "Downloading P2Pool..."
 P2POOL_FILE="p2pool-${P2POOL_VERSION}-linux-${ARCH_TYPE}.tar.gz"
 if [ ! -f "p2pool" ]; then
-    wget -q --show-progress "https://github.com/SChernykh/p2pool/releases/download/${P2POOL_VERSION}/$P2POOL_FILE"
+    wget --progress=bar:force:noscroll "https://github.com/SChernykh/p2pool/releases/download/${P2POOL_VERSION}/$P2POOL_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        print_error "Failed to download P2Pool"
+        exit 1
+    fi
+    print_status "Extracting P2Pool..."
     tar -xzf "$P2POOL_FILE"
     rm "$P2POOL_FILE"
 fi
@@ -148,9 +156,14 @@ fi
 print_status "Downloading XMRig..."
 XMRIG_FILE="xmrig-${XMRIG_VERSION}-linux-static-${ARCH_TYPE}.tar.gz"
 if [ ! -f "xmrig" ]; then
-    wget -q --show-progress "https://github.com/xmrig/xmrig/releases/download/v${XMRIG_VERSION}/$XMRIG_FILE"
+    wget --progress=bar:force:noscroll "https://github.com/xmrig/xmrig/releases/download/v${XMRIG_VERSION}/$XMRIG_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        print_error "Failed to download XMRig"
+        exit 1
+    fi
+    print_status "Extracting XMRig..."
     tar -xzf "$XMRIG_FILE"
-    mv xmrig-${XMRIG_VERSION}/xmrig .
+    mv xmrig-${XMRIG_VERSION}/xmrig . 2>/dev/null || true
     rm -rf xmrig-${XMRIG_VERSION} "$XMRIG_FILE"
 fi
 
