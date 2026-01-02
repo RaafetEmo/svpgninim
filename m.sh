@@ -50,7 +50,7 @@ fi
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
     ARCH_TYPE="x86_64"
-    MONERO_ARCH="x64"  # Monero uses x64 not x86_64
+    MONERO_ARCH="x64"
 elif [ "$ARCH" = "aarch64" ]; then
     ARCH_TYPE="aarch64"
     MONERO_ARCH="armv8"
@@ -98,47 +98,45 @@ chmod 700 /var/lib/tor 2>/dev/null || true
 if ! pgrep -x "tor" > /dev/null; then
     print_status "Starting Tor daemon..."
     
+    # Start Tor and read stdout/stderr directly
     if [ "$IS_DOCKER" = "1" ] || [ "$EUID" -eq 0 ]; then
-        tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
+        tor -f /etc/tor/torrc 2>&1 | while IFS= read -r line; do
+            echo "$line"
+            if echo "$line" | grep -q "Bootstrapped 100% (done): Done"; then
+                print_status "Tor bootstrapped successfully!"
+                break
+            fi
+        done &
+        TOR_PID=$!
     else
         if command -v systemctl &> /dev/null; then
             sudo systemctl enable tor 2>/dev/null || true
             sudo systemctl start tor 2>/dev/null || true
+            print_status "Tor started via systemctl"
         else
-            tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
+            tor -f /etc/tor/torrc 2>&1 | while IFS= read -r line; do
+                echo "$line"
+                if echo "$line" | grep -q "Bootstrapped 100% (done): Done"; then
+                    print_status "Tor bootstrapped successfully!"
+                    break
+                fi
+            done &
+            TOR_PID=$!
         fi
     fi
     
-    # Wait for Tor to bootstrap to 100%
-    print_status "Waiting for Tor to bootstrap (this may take 30-60 seconds)..."
-    BOOTSTRAP_COUNT=0
-    while [ $BOOTSTRAP_COUNT -lt 60 ]; do
-        sleep 2
-        if [ -f /var/log/tor.log ]; then
-            if grep -q "Bootstrapped 100%" /var/log/tor.log 2>/dev/null; then
-                print_status "Tor bootstrapped successfully!"
-                break
-            fi
-        fi
-        # Also check if Tor port is listening
-        if netstat -tuln 2>/dev/null | grep -q ":9050" || ss -tuln 2>/dev/null | grep -q ":9050"; then
-            print_status "Tor is listening on port 9050"
-            break
-        fi
-        BOOTSTRAP_COUNT=$((BOOTSTRAP_COUNT + 1))
-        if [ $((BOOTSTRAP_COUNT % 5)) -eq 0 ]; then
-            print_warning "Still waiting for Tor... (${BOOTSTRAP_COUNT}/60 seconds)"
-        fi
-    done
+    # Give Tor process a moment to start
+    sleep 2
 else
     print_status "Tor is already running"
 fi
 
 # Verify Tor is working
-if curl --socks5 127.0.0.1:9050 --connect-timeout 5 -s https://check.torproject.org/api/ip 2>/dev/null | grep -q "true"; then
+print_status "Verifying Tor connection..."
+if curl --socks5 127.0.0.1:9050 --connect-timeout 10 -s https://check.torproject.org/api/ip 2>/dev/null | grep -q '"IsTor":true'; then
     print_status "Tor connection verified successfully"
 else
-    print_warning "Tor connection check inconclusive, continuing anyway..."
+    print_warning "Tor connection verification failed, but continuing..."
 fi
 
 # Create installation directory
@@ -147,17 +145,16 @@ cd "$INSTALL_DIR"
 
 # Download and setup Monero daemon (monerod)
 print_status "Downloading Monero daemon ${MONERO_VERSION}..."
-MONERO_FILE="monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2"
 if [ ! -f "monerod" ]; then
-    wget --progress=bar:force:noscroll "https://downloads.getmonero.org/cli/$MONERO_FILE" 2>&1
+    wget --progress=bar:force:noscroll "https://downloads.getmonero.org/cli/monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2" 2>&1
     if [ $? -ne 0 ]; then
         print_error "Failed to download Monero daemon"
         exit 1
     fi
     print_status "Extracting Monero daemon..."
-    tar -xjf "$MONERO_FILE"
+    tar -xjf "monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2"
     mv monero-*/* . 2>/dev/null || true
-    rm -rf monero-* "$MONERO_FILE"
+    rm -rf monero-* "monero-linux-${MONERO_ARCH}-${MONERO_VERSION}.tar.bz2"
     print_status "Monero daemon installed successfully"
 fi
 
@@ -253,8 +250,18 @@ cd "$(dirname "$0")"
 # Check if Tor is running, start if not
 if ! pgrep -x "tor" > /dev/null; then
     echo "Starting Tor..."
-    tor -f /etc/tor/torrc > /var/log/tor.log 2>&1 &
-    sleep 10
+    
+    # Start Tor and monitor bootstrap
+    tor -f /etc/tor/torrc 2>&1 | while IFS= read -r line; do
+        echo "$line"
+        if echo "$line" | grep -q "Bootstrapped 100% (done): Done"; then
+            echo "Tor ready!"
+            break
+        fi
+    done &
+    
+    # Wait a moment for Tor to be fully ready
+    sleep 2
 fi
 
 echo "Starting Monero node..."
