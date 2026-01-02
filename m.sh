@@ -92,7 +92,8 @@ DataDirectory /var/lib/tor
 Log notice stdout
 EOF
 
-chmod 700 /var/lib/tor 2>/dev/null || true
+# Fix permissions for Tor data directory
+chown -R $(whoami):$(id -gn) /var/lib/tor 2>/dev/null || chmod 700 /var/lib/tor
 
 # Start Tor in background if not running
 if ! pgrep -x "tor" > /dev/null; then
@@ -223,17 +224,22 @@ cd "$(dirname "$0")"
 if ! pgrep -x "tor" > /dev/null; then
     echo "Starting Tor..."
     
-    # Start Tor and monitor bootstrap
-    tor -f /etc/tor/torrc 2>&1 | while IFS= read -r line; do
-        echo "$line"
-        if echo "$line" | grep -q "Bootstrapped 100% (done): Done"; then
-            echo "Tor ready!"
-            break
-        fi
-    done &
+    # Fix permissions
+    chown -R $(whoami):$(id -gn) /var/lib/tor 2>/dev/null || chmod 700 /var/lib/tor
     
-    # Wait a moment for Tor to be fully ready
-    sleep 2
+    # Start Tor and monitor bootstrap
+    tor -f /etc/tor/torrc 2>&1 | {
+        while IFS= read -r line; do
+            echo "$line"
+            if echo "$line" | grep -q "Bootstrapped 100%"; then
+                echo "Tor ready!"
+                break
+            fi
+        done
+    } &
+    
+    # Wait for Tor to be ready
+    sleep 3
 fi
 
 echo "Starting Monero node..."
