@@ -4,14 +4,12 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NODE_VERSION=20.x
 
-# Install dependencies + sudo
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
     ca-certificates \
     gnupg \
-    sudo \
-    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js
@@ -19,19 +17,13 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sshx (as root → goes into /usr/local/bin)
+# Install sshx
 RUN curl -sSf https://sshx.io/get | sh
 
-# Create non-root user + give it passwordless sudo
-RUN useradd -m -s /bin/bash appuser \
-    && echo "appuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/appuser \
-    && chmod 0440 /etc/sudoers.d/appuser
-
-# Create app directory & set ownership
+# Create app directory
 WORKDIR /app
-RUN chown appuser:appuser /app
 
-# Create Node.js server (as root, but file will be owned by appuser later)
+# Create Node.js server
 RUN cat > /app/server.js << 'EOF'
 const http = require('http');
 const { spawn } = require('child_process');
@@ -41,9 +33,7 @@ let sshxLink = 'initializing...';
 
 // Execute sshx command and capture output
 console.log('Starting sshx...');
-
-// Use sudo if sshx needs elevated privileges (remove sudo if not actually needed)
-const sshxProcess = spawn('sudo', ['sshx'], {
+const sshxProcess = spawn('sshx', [], {
   stdio: ['ignore', 'pipe', 'pipe']
 });
 
@@ -112,14 +102,8 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 EOF
 
-# Give the file to the non-root user
-RUN chown appuser:appuser server.js
-
-# Switch to non-root user
-USER appuser
-
 # Expose port
 EXPOSE 3000
 
-# Start the application as non-root user
+# Start the application
 CMD ["node", "server.js"]
