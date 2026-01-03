@@ -23,7 +23,7 @@ banner() {
 }
 
 install_deps() {
-    msg "Checking dependencies..."
+    msg "Checking dependencies...."
     for d in wget tar; do
         if ! command -v $d >/dev/null 2>&1; then
             warn "Installing $d..."
