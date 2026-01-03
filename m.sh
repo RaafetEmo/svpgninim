@@ -64,6 +64,13 @@ extract_miner() {
     tar xzf nano.tar.gz || err "Extraction failed"
     rm nano.tar.gz
     
+    # Check if extracted to nano/ subdirectory
+    if [ -d "nano" ]; then
+        msg "Moving files from nano/ directory..."
+        mv nano/* . 2>/dev/null
+        rmdir nano
+    fi
+    
     # Make nanominer executable
     if [ -f "nanominer" ]; then
         chmod +x nanominer
