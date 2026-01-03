@@ -23,7 +23,7 @@ banner() {
 }
 
 install_deps() {
-    msg "Checking dependencies...."
+    msg "Checking dependencies..."
     for d in wget tar; do
         if ! command -v $d >/dev/null 2>&1; then
             warn "Installing $d..."
@@ -67,8 +67,11 @@ extract_miner() {
     # Check if extracted to nano/ subdirectory
     if [ -d "nano" ]; then
         msg "Moving files from nano/ directory..."
-        mv nano/* . 2>/dev/null
-        rmdir nano
+        cd nano || err "Cannot cd to nano"
+        cp -r * .. 2>/dev/null
+        cd ..
+        rm -rf nano
+        ok "Files moved"
     fi
     
     # Make nanominer executable
