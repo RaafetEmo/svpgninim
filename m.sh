@@ -2,7 +2,7 @@
 
 #=============================================================================
 # NANOMINER MONERO (XMR) MINING - NANOPOOL
-# Nanominer automatically connects to Nanopool - NO POOL URL NEEDED!
+# Auto-connects to Nanopool - NO POOL URL NEEDED!
 #=============================================================================
 
 #=============================================================================
@@ -14,13 +14,7 @@ EMAIL="your@email.com"
 
 # Miner Settings
 VERSION="3.10.0"
-CPU_THREADS="0"  # 0 = use all threads
-
-#=============================================================================
-# COLORS
-#=============================================================================
-R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'
-C='\033[0;36m'; W='\033[1;37m'; N='\033[0m'; B='\033[1m'
+CPU_THREADS="0"
 
 #=============================================================================
 # PATHS
@@ -32,27 +26,27 @@ LOGS="$DIR/logs"
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
-msg() { echo -e "${C}[*]${N} ${B}$1${N}"; }
-ok() { echo -e "${G}[✓]${N} $1"; }
-err() { echo -e "${R}[✗]${N} $1"; exit 1; }
-warn() { echo -e "${Y}[!]${N} $1"; }
+msg() { echo "[*] $1"; }
+ok() { echo "[✓] $1"; }
+err() { echo "[✗] $1"; exit 1; }
+warn() { echo "[!] $1"; }
 
 banner() {
     clear
-    echo -e "${C}╔═══════════════════════════════════════════════╗${N}"
-    echo -e "${C}║${W}   Nanominer v${VERSION} - Monero (XMR)       ${N}${C}║${N}"
-    echo -e "${C}║${W}   Auto-connects to Nanopool               ${N}${C}║${N}"
-    echo -e "${C}╚═══════════════════════════════════════════════╝${N}"
+    echo "╔═══════════════════════════════════════════════╗"
+    echo "║   Nanominer v${VERSION} - Monero (XMR)       ║"
+    echo "║   Auto-connects to Nanopool               ║"
+    echo "╚═══════════════════════════════════════════════╝"
     echo ""
 }
 
 install_deps() {
     msg "Checking dependencies..."
     for d in wget tar; do
-        command -v $d &>/dev/null || {
+        if ! command -v $d >/dev/null 2>&1; then
             warn "Installing $d..."
-            sudo apt-get update -qq && sudo apt-get install -y $d || err "Failed to install $d"
-        }
+            apt-get update -qq && apt-get install -y $d || err "Failed to install $d"
+        fi
         ok "$d ready"
     done
     echo ""
@@ -62,9 +56,12 @@ download() {
     msg "Downloading Nanominer v${VERSION}..."
     cd "$MINER" || err "Cannot cd to $MINER"
     
-    [ -f "nanominer" ] && { ok "Already exists"; return 0; }
+    if [ -f "nanominer" ]; then
+        ok "Already exists"
+        return 0
+    fi
     
-    local url="https://github.com/nanopool/nanominer/releases/download/v${VERSION}/nanominer-linux-${VERSION}.tar.gz"
+    url="https://github.com/nanopool/nanominer/releases/download/v${VERSION}/nanominer-linux-${VERSION}.tar.gz"
     
     wget -q --show-progress "$url" -O nm.tar.gz || err "Download failed"
     tar xzf nm.tar.gz || err "Extract failed"
@@ -86,7 +83,9 @@ rigName = $WORKER
 email = $EMAIL
 EOF
 
-    [ "$CPU_THREADS" != "0" ] && echo "cpuThreads = $CPU_THREADS" >> config.ini
+    if [ "$CPU_THREADS" != "0" ]; then
+        echo "cpuThreads = $CPU_THREADS" >> config.ini
+    fi
     
     cat >> config.ini <<EOF
 
@@ -96,43 +95,73 @@ EOF
     
     ok "Config created"
     echo ""
-    echo -e "${C}Settings:${N}"
-    echo -e "  Wallet:  ${Y}${WALLET:0:12}...${WALLET: -8}${N}"
-    echo -e "  Worker:  ${W}$WORKER${N}"
-    echo -e "  Pool:    ${G}Nanopool (auto)${N}"
-    [ "$CPU_THREADS" != "0" ] && echo -e "  Threads: $CPU_THREADS" || echo -e "  Threads: All CPUs"
+    echo "Settings:"
+    wallet_start=$(echo $WALLET | cut -c1-12)
+    wallet_end=$(echo $WALLET | cut -c87-95)
+    echo "  Wallet:  ${wallet_start}...${wallet_end}"
+    echo "  Worker:  $WORKER"
+    echo "  Pool:    Nanopool (auto)"
+    if [ "$CPU_THREADS" != "0" ]; then
+        echo "  Threads: $CPU_THREADS"
+    else
+        echo "  Threads: All CPUs"
+    fi
     echo ""
 }
 
 optimize() {
     msg "Optimizing..."
-    sudo modprobe msr 2>/dev/null && ok "MSR loaded" || warn "MSR unavailable"
-    sudo sysctl -w vm.nr_hugepages=1168 &>/dev/null && ok "Huge pages set" || warn "Huge pages failed"
+    if modprobe msr 2>/dev/null; then
+        ok "MSR loaded"
+    else
+        warn "MSR unavailable"
+    fi
+    
+    if sysctl -w vm.nr_hugepages=1168 >/dev/null 2>&1; then
+        ok "Huge pages set"
+    else
+        warn "Huge pages failed (may need root or writable /proc)"
+    fi
     echo ""
 }
 
 mine() {
     cd "$MINER" || err "Cannot cd to $MINER"
-    pkill -9 nanominer 2>/dev/null; sleep 1
+    pkill -9 nanominer 2>/dev/null
+    sleep 1
     
     banner
-    echo -e "${G}╔═══════════════════════════════════════════════╗${N}"
-    echo -e "${G}║           🚀 MINING STARTED 🚀                ║${N}"
-    echo -e "${G}╠═══════════════════════════════════════════════╣${N}"
-    echo -e "${G}║${N} Worker: ${W}$WORKER${N}"
-    echo -e "${G}║${N} Coin:   ${C}Monero (XMR)${N}"
-    echo -e "${G}║${N} Pool:   ${Y}Nanopool (automatic)${N}"
-    echo -e "${G}╠═══════════════════════════════════════════════╣${N}"
-    echo -e "${G}║${N} Press ${Y}Ctrl+C${N} to stop"
-    echo -e "${G}╚═══════════════════════════════════════════════╝${N}"
+    echo "╔═══════════════════════════════════════════════╗"
+    echo "║           🚀 MINING STARTED 🚀                ║"
+    echo "╠═══════════════════════════════════════════════╣"
+    echo "║ Worker: $WORKER"
+    echo "║ Coin:   Monero (XMR)"
+    echo "║ Pool:   Nanopool (automatic)"
+    echo "╠═══════════════════════════════════════════════╣"
+    echo "║ Press Ctrl+C to stop"
+    echo "╚═══════════════════════════════════════════════╝"
     echo ""
     
     ./nanominer
 }
 
 stop() {
-    echo ""; warn "Stopping..."; pkill -9 nanominer 2>/dev/null
-    ok "Stopped"; echo ""; exit 0
+    echo ""
+    warn "Stopping..."
+    pkill -9 nanominer 2>/dev/null
+    ok "Stopped"
+    echo ""
+    exit 0
+}
+
+validate_wallet() {
+    # Simple check: starts with 4 and is 95 chars
+    wallet_len=$(echo -n "$WALLET" | wc -c)
+    wallet_first=$(echo "$WALLET" | cut -c1)
+    
+    if [ "$wallet_first" != "4" ] || [ "$wallet_len" != "95" ]; then
+        err "Invalid Monero wallet!"
+    fi
 }
 
 #=============================================================================
@@ -142,7 +171,7 @@ main() {
     banner
     
     # Validate
-    [[ ! "$WALLET" =~ ^4[0-9A-Za-z]{94}$ ]] && err "Invalid Monero wallet!"
+    validate_wallet
     
     # Setup
     mkdir -p "$DIR" "$MINER" "$LOGS"
