@@ -10,7 +10,7 @@
 #=============================================================================
 WALLET="47PFHCgahfpFHUN7NcRRoZYYewoexEnVxeDiEVtbhXpigBjyE7QrRFp3i5FmZy74C2j9sXcYiX3fJNS5gaB6wAL2NEipZxg"
 WORKER="VPS-2"
-EMAIL="your@email.com"
+EMAIL="22222@email.com"
 
 # Miner Settings
 VERSION="3.10.0"
